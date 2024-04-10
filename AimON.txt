@@ -1,0 +1,135 @@
+local Area = game:GetService("Workspace")
+local UIS = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local MyView = Area.CurrentCamera
+local Locked = false
+local Target = nil
+local Epitaph = 0
+local HeadOffset = Vector3.new(0, .1, 0)
+
+_G.TeamCheck = false
+_G.AimPart = "Head"
+_G.CircleRadius = 45
+_G.ScriptActive = true
+
+-- Skull asset
+local skullAssetId = "rbxassetid://17085157521"
+
+-- Create the FOV circle
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Radius = _G.CircleRadius
+FOVCircle.Thickness = 2
+FOVCircle.Filled = false
+FOVCircle.Transparency = 0.5
+FOVCircle.Visible = true
+
+local function UpdateFOVCirclePosition()
+    if not _G.ScriptActive then return end
+    local mouseLocation = UIS:GetMouseLocation()
+    FOVCircle.Position = Vector2.new(mouseLocation.X, mouseLocation.Y)
+end
+
+local hue = 0
+local function UpdateRainbowColor()
+    if not _G.ScriptActive then return end
+    hue = (hue + 1) % 360
+    FOVCircle.Color = Color3.fromHSV(hue / 360, 1, 1)
+end
+
+local function CreateSkullIcon(target)
+    local billboardGui = Instance.new("BillboardGui", target.Head)
+    billboardGui.Adornee = target.Head
+    billboardGui.Size = UDim2.new(0, 50, 0, 50) -- Scaled to 0.5x head size
+    billboardGui.AlwaysOnTop = true
+    billboardGui.Name = "SkullIcon"
+
+    local imageLabel = Instance.new("ImageLabel", billboardGui)
+    imageLabel.Size = UDim2.fromScale(1, 1)
+    imageLabel.Image = skullAssetId
+    imageLabel.BackgroundTransparency = 1
+end
+
+local function RemoveSkullIcon(target)
+    if target and target.Head:FindFirstChild("SkullIcon") then
+        target.Head.SkullIcon:Destroy()
+    end
+end
+
+local function FindNearestPlayerFromClosestTwo()
+    if not _G.ScriptActive then return end
+    local myCharacter = LocalPlayer.Character
+    local myPosition = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart") and myCharacter.HumanoidRootPart.Position
+    if not myPosition then return nil end
+
+    local playersAndDistances = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if _G.TeamCheck == false or (_G.TeamCheck == true and player.Team ~= LocalPlayer.Team) then
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character:FindFirstChild("Humanoid").Health > 0 and player.Character:FindFirstChild(_G.AimPart) then
+                local theirPosition = player.Character.HumanoidRootPart.Position
+                local dist = (myPosition - theirPosition).magnitude
+                table.insert(playersAndDistances, {player = player, dist = dist})
+            end
+        end
+    end
+
+    table.sort(playersAndDistances, function(a, b) return a.dist < b.dist end)
+    local closestTwo = {playersAndDistances[1], playersAndDistances[2]}
+
+    local nearestTarget = nil
+    local smallestDistToCursor = _G.CircleRadius
+    for _, info in ipairs(closestTwo) do
+        if info and info.player.Character then
+            local charPart, visible = MyView:WorldToViewportPoint(info.player.Character[_G.AimPart].Position + HeadOffset)
+            if visible then
+                local screenPoint = Vector2.new(charPart.X, charPart.Y)
+                local cursorPoint = UIS:GetMouseLocation()
+                local distToCursor = (cursorPoint - screenPoint).magnitude
+                if distToCursor < smallestDistToCursor then
+                    smallestDistToCursor = distToCursor
+                    nearestTarget = info.player.Character
+                end
+            end
+        end
+    end
+
+    return nearestTarget
+end
+
+local function ToggleLock()
+    if not _G.ScriptActive then return end
+    Locked = not Locked
+    if Locked then
+        if Target then RemoveSkullIcon(Target) end  -- Remove icon from previous target if any
+        Target = FindNearestPlayerFromClosestTwo()
+        if Target then
+            CreateSkullIcon(Target)  -- Create a skull icon over the new target
+        else
+            Locked = false
+        end
+    else
+        if Target then RemoveSkullIcon(Target) end  -- Remove icon since unlocking
+        Target = nil
+    end
+end
+
+UIS.InputBegan:Connect(function(Input, GameProcessed)
+    if not GameProcessed and Input.KeyCode == Enum.KeyCode.E then
+        ToggleLock()
+    end
+end)
+
+game:GetService("RunService").RenderStepped:Connect(function()
+    if not _G.ScriptActive then
+        FOVCircle.Visible = false
+        if Target then RemoveSkullIcon(Target) end  -- Ensure to remove the skull icon if script is deactivated
+        return
+    end
+    FOVCircle.Visible = true
+    UpdateFOVCirclePosition()
+    UpdateRainbowColor()
+    if Locked and Target then
+        local TargetPosition = Target[_G.AimPart].Position + HeadOffset
+        MyView.CFrame = CFrame.lookAt(MyView.CFrame.Position, TargetPosition)
+    end
+end)
